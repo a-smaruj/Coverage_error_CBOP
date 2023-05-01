@@ -6,98 +6,106 @@ output: html_notebook
 ```{r}
 library(RcppSimdJson)
 library(data.table)
-library("lubridate")
+library(lubridate)
 library(tidyverse)
 library(stringi)
 library(scales)
 ```
 
 ```{r}
-read_cbop <- function(file) {
-  cbop_file <- readLines(file)
-  cbop <- fparse(json = cbop_file[1])
-
-  cbop_list <- list()
-  for (i in 1:length(cbop)) {
-    
-      prac <- cbop[[i]]$danePracodawcy
-      names(prac) <- cbop[[i]]$hash
-      prac_df <-  rbindlist(prac, idcol = "hash")
-      setnames(prac_df, names(prac_df)[-1], paste0("prac_", names(prac_df)[-1]))
-      
-      pozostaleDane <- rbindlist(cbop[[i]]$pozostaleDane)
-      setnames(pozostaleDane, names(pozostaleDane), paste0("poz_", names(pozostaleDane)))
-      
-      warunkiPracyIPlacy <- rbindlist(cbop[[i]]$warunkiPracyIPlacy)
-      setnames(warunkiPracyIPlacy, names(warunkiPracyIPlacy), 
-               paste0("war_", names(warunkiPracyIPlacy)))
-      
-      prac_df <- cbind(prac_df, pozostaleDane, warunkiPracyIPlacy)
-      
-      prac_df[, ":="(typOferty = cbop[[i]]$typOferty,
-                     czyWazna = cbop[[i]]$czyWazna,
-                     statusOferty = cbop[[i]]$statusOferty)]
-      cbop_list[[i]] <- prac_df
+read_process_cbop <- function(file) {
+  cbop <- fload(file)
+  cbop_df <- rbindlist(cbop)
+  
+  warunki <-
+    lapply(cbop_df$warunkiPracyIPlacy, lapply, function(x)
+      ifelse(is.null(x), NA, x))
+  warunki <- rbindlist(warunki)
+  setnames(warunki, names(warunki), paste0("war_", names(warunki)))
+  
+  pracodawca <-
+    lapply(cbop_df$danePracodawcy, lapply, function(x)
+      ifelse(is.null(x), NA, x))
+  pracodawca <- rbindlist(pracodawca)
+  setnames(pracodawca, names(pracodawca), paste0("pra_", names(pracodawca)))
+  
+  pozostale <-
+    lapply(cbop_df$pozostaleDane, lapply, function(x)
+      ifelse(is.null(x), NA, x))
+  pozostale <- rbindlist(pozostale)
+  setnames(pozostale, names(pozostale), paste0("poz_", names(pozostale)))
+  cbop_details <- cbind(pracodawca, warunki, pozostale)
+  
+  cbop_details[, hash := cbop_df$hash]
+  cbop_details[, typOferty := cbop_df$typOferty]
+  cbop_details[, zagranicznaEures := cbop_df$zagranicznaEures]
+  
+  cbop_details[, pra_regon := str_remove_all(pra_regon, "\\D")]
+  cbop_details[, pra_regon := ifelse(pra_regon == "", NA, pra_regon)]
+  cbop_details[, pra_regon := ifelse(nchar(pra_regon) == 8, 
+                                     paste0("0", pra_regon), pra_regon)]
+  cbop_details[, kod_pocztowy := str_extract(war_miejscePracy,
+                                                        "\\d{2}\\-\\d{3}")]
+  
+  for (p in c(0, 1, 9)) {
+    cbop_details[str_detect(pra_regon, sprintf("^%s{9}", p)), pra_regon := NA]
   }
-
-  cbop_list_df <- rbindlist(cbop_list)
-  cbop_list_df[, .SD, .SDcols = names(cbop_list_df) %like% "data|oferta"]
-  cbop_list_df[, ":="(poz_dataPrzyjZglosz=dmy(poz_dataPrzyjZglosz),
-                      poz_ofertaWaznaDo=dmy(poz_ofertaWaznaDo))]
   
-  final_df <- cbop_list_df[][, ":="(prac_nip = str_remove_all(prac_nip, "-"),
-                                 kod_pocztowy = str_extract(war_miejscePracy,
-                                                            "\\d{2}\\-\\d{3}"))]
+  cbop_details[, pra_regon := str_pad(pra_regon, 14, "right", pad = "0")]
   
-  final_df[, ":="(war_gmina = tolower(war_gmina), 
-                  war_ulica=tolower(war_ulica),
-                  war_miejscowosc=tolower(war_miejscowosc),
-                  war_stanowisko=tolower(war_stanowisko))]
-  final_df[, war_ulica:=str_replace(war_ulica,  "pl\\.", "plac ")]	
-  final_df[, war_ulica:=str_replace(war_ulica,  "al\\.", "aleja ")]	
-  final_df[, war_ulica:=str_replace(war_ulica,  "  ", " ")]	
-  final_df[, war_ulica:=str_remove(war_ulica,  "^\\.|-$")]
-  final_df[, ":="(war_gmina = str_remove(war_gmina, "m.st. "))]
-  final_df[, kod_pocztowy:=str_remove(kod_pocztowy, "00-000")]
-  final_df[kod_pocztowy == "", kod_pocztowy := NA]
-  final_df[, poz_kodZawodu := str_remove(poz_kodZawodu, "RPd057\\|")]
-  final_df[, poz_grupaZawodu := substr(poz_kodZawodu, 1, 1)]
-  final_df[, prac_regon := substr(prac_regon, 1, 9)]
-  final_df[, poz_dataUdostepnieniaOferty := dmy(poz_dataUdostepnieniaOferty)]
-
-  return(final_df)
+  ## nip id
+  cbop_details[, pra_nip := str_remove_all(pra_nip, "\\D")]
+  cbop_details[, pra_nip := ifelse(pra_nip == "", NA, pra_nip)]
+  
+  for (p in 0:9) {
+    cbop_details[str_detect(pra_nip, sprintf("^%s{9}", p)), pra_nip := NA]
+  }
+  
+  ## bez identyfikatorów - usuwamy
+  cbop_details <- cbop_details[!(is.na(pra_regon) & is.na(pra_nip))]
+  
+  daty <-
+    c(
+      "war_dataZakonczeniaPracy",
+      "war_dataRozpoczeciaPracy",
+      "poz_dataUdostepnieniaOferty",
+      "poz_ofertaWaznaDo",
+      "poz_dataPrzyjZglosz"
+    )
+  
+  cbop_details[, (daty) := lapply(.SD, as.Date, format = "%d.%m.%Y"), .SDcols = daty]
+  
+  return(cbop_details)
 }
 ```
 
 ```{r}
 #Chosen columns to keep
-columns_to_keep <- c('file', 'hash', 'prac_osobaDoKontaktu', 'prac_nrTelefonu', 'prac_nip', 'prac_nazwaUrzeduPracy', 'prac_regon', 'poz_kodZawodu', 'poz_zawod', 'poz_grupaZawodu', 'poz_lWolnychMiejsc', 'poz_kodKategoriiOferty', 'poz_udostepnionoDoEURES', 'poz_dlaPoborowych', 'poz_ofertaDlaOsobZarej', 'poz_identyfikatorOferty', 'poz_lWolnychMiejscDlaNiepeln', 'poz_finansZPfron', 'poz_ofertaWaznaDo', 'poz_ofertaZgloszonaPrzez', 'poz_ofertaZgloszonaPrzezKodJednostki', 'poz_dataUdostepnieniaOferty', 'poz_dataPrzyjZglosz', 'war_dataZakonczeniaPracy', 'war_miejscePracyCzlonDrugi', 'war_zakresObowiazkow', 'war_opisOferty', 'war_rodzajZatrudnienia', 'war_miejscePracyCzlonPierwszy', 'war_lGodzinWMiesiacu', 'war_kodZmianowosci', 'war_wojewodztwo', 'war_kodWojewodztwa', 'war_ulica', 'war_powiat', 'war_kodPowiatu', 'war_zawod', 'war_gmina', 'war_opisWynagrodzenia', 'war_pracaWWolneDni', 'war_wynagrodzenieBrutto', 'war_nrBudynku', 'war_kodSystemuWynagradzania', 'war_nrLokalu', 'war_miejscePracy', 'war_lGodzinWTygodniu', 'war_stanowisko', 'war_dataRozpoczeciaPracy', 'war_wymiarEtatu', 'war_miejscowosc', 'war_zatrOdZaraz', 'war_kodMiejscowosci', 'war_pracaStala', 'war_wynagrodzenieBruttoZTypemStawki', 'war_zmianowosc', 'war_pracaTymczasowa', 'war_kodRodzajuZatrudnienia', 'kod_pocztowy')
+columns_to_keep <- c('hash', 'pra_osobaDoKontaktu', 'pra_nrTelefonu', 'pra_nip', 'pra_nazwaUrzeduPracy', 'pra_regon', 'poz_kodZawodu', 'poz_zawod', 'poz_lWolnychMiejsc', 'poz_kodKategoriiOferty', 'poz_udostepnionoDoEURES', 'poz_dlaPoborowych', 'poz_ofertaDlaOsobZarej', 'poz_identyfikatorOferty', 'poz_lWolnychMiejscDlaNiepeln', 'poz_finansZPfron', 'poz_ofertaWaznaDo', 'poz_ofertaZgloszonaPrzez', 'poz_ofertaZgloszonaPrzezKodJednostki', 'poz_dataUdostepnieniaOferty', 'poz_dataPrzyjZglosz', 'war_dataZakonczeniaPracy', 'war_miejscePracyCzlonDrugi', 'war_zakresObowiazkow', 'war_opisOferty', 'war_rodzajZatrudnienia', 'war_miejscePracyCzlonPierwszy', 'war_lGodzinWMiesiacu', 'war_kodZmianowosci', 'war_wojewodztwo', 'war_kodWojewodztwa', 'war_ulica', 'war_powiat', 'war_kodPowiatu', 'war_zawod', 'war_gmina', 'war_opisWynagrodzenia', 'war_pracaWWolneDni', 'war_wynagrodzenieBrutto', 'war_nrBudynku', 'war_kodSystemuWynagradzania', 'war_nrLokalu', 'war_miejscePracy', 'war_lGodzinWTygodniu', 'war_stanowisko', 'war_dataRozpoczeciaPracy', 'war_wymiarEtatu', 'war_miejscowosc', 'war_zatrOdZaraz', 'war_kodMiejscowosci', 'war_pracaStala', 'war_wynagrodzenieBruttoZTypemStawki', 'war_zmianowosc', 'war_pracaTymczasowa', 'war_kodRodzajuZatrudnienia', 'kod_pocztowy')
 ```
 
 ```{r}
-create_table <- function(cbop_year, files) {
-  for (file in files) {
-    cbop_year[[length(cbop_year)+1]] <- read_cbop(file)
-  }
+create_table <- function(files) {
   
-  files <- str_remove_all(files, '(data\\\\\\d+\\\\|_full.json)')
-  
-  names(cbop_year) <- basename(files)
-  cbop_year <- rbindlist(cbop_year, idcol = "file")
-  cbop_year$file <- ymd(cbop_year$file)
+  cbop_year <- read_process_cbop(files)
   
   stats_all_tab <<- append(stats_all_tab, sum(cbop_year$poz_lWolnychMiejsc, na.rm = TRUE))
   
-  cbop_year <- cbop_year[typOferty == "OFERTA_PRACY" & 
-                             czyWazna == TRUE & 
-                             war_kraj == "Polska" & 
-                        (!is.na(prac_regon) | !is.na(prac_nip)) &
-                          war_rodzajZatrudnienia %in% 
-                              c("Umowa o pracę na czas określony",                                                        "Umowa o pracę na czas nieokreślony", 
-                                "Umowa o pracę w zastępstwie", 
-                                "Umowa o pracę na okres próbny",
-                                "Umowa na czas wyk. określonej pracy")][][
-                            !prac_nip %in% c("0000000000", "1111111111")]
+  #requirements
+  umowy_typ <- c("Umowa o pracę na okres próbny",
+                  "Umowa o pracę na czas określony",
+                  "Umowa o pracę na czas nieokreślony",
+                  "Umowa o pracę w zastępstwie",
+                  "Mianowanie",
+                  "Wybór",
+                  "Umowa o pomocy przy zbiorach",
+                  "Umowa agencyjna",
+                  "Umowa na czas wyk. określonej pracy",
+                  "Spółdzielcza umowa o pracę",
+                  "Powołanie",
+                  "Delegowanie")
+  cbop_year <- cbop_year[war_rodzajZatrudnienia %in% umowy_typ]
+  cbop_year <- cbop_year[war_kraj == "Polska"]
   
   cbop_year <- cbop_year[, ..columns_to_keep]
   
@@ -108,202 +116,54 @@ create_table <- function(cbop_year, files) {
 ```
 
 ```{r}
-remove_duplicates <- function(cbop_year) {
-  
-  vector_year_stat <- c()
-  vector_year_stat <- append(vector_year_stat, length(cbop_year$hash))
-  
-  #Identical job offers
-  cbop_year <- cbop_year %>% filter(duplicated(cbop_year,
-                                               by=names(cbop_year)[names(cbop_year)
-                                                                   !='file'], 
-                                       fromLast = TRUE) == FALSE)
-  vector_year_stat <- append(vector_year_stat, length(cbop_year$hash))
-  
-  #Spelling mistakes
-  for (i in columns_to_keep) {
-    if (is.character(cbop_year[[i]]) == TRUE) cbop_year[[i]] <-
-    stri_trans_general(cbop_year[[i]], 'pl-ascii')
-  }
-  
-  cbop_year <- cbop_year %>% filter(duplicated(cbop_year,
-                                               by=names(cbop_year)[names(cbop_year)
-                                                                   !='file'], 
-                                       fromLast = TRUE) == FALSE)
-  vector_year_stat <- append(vector_year_stat, length(cbop_year$hash))
-  
-  #Prolonged job offers
-  cbop_year <- cbop_year %>% filter(duplicated(cbop_year, 
-                                       by=names(cbop_year)[!names(cbop_year) %in% 
-                                                    c('file','poz_ofertaWaznaDo')], 
-                                       fromLast = TRUE) == FALSE)
-  vector_year_stat <- append(vector_year_stat, length(cbop_year$hash))
-  
-  #Actualised job offers - different start date
-  cbop_year <- cbop_year %>% filter(duplicated(cbop_year, 
-                                       by=names(cbop_year)[!names(cbop_year) %in% 
-                                                    c('file','war_dataRozpoczeciaPracy')], 
-                                       fromLast = TRUE) == FALSE)
-  vector_year_stat <- append(vector_year_stat, length(cbop_year$hash))
-  
-  #Actualised job offers - different end date
-  cbop_year <- cbop_year %>% filter(duplicated(cbop_year, 
-                                       by=names(cbop_year)[!names(cbop_year) %in% 
-                                                    c('file','war_dataZakonczeniaPracy')], 
-                                       fromLast = TRUE) == FALSE)
-  vector_year_stat <- append(vector_year_stat, length(cbop_year$hash))
-  
-  #Actualised job offers - different salary
-  cbop_year <- cbop_year %>% filter(duplicated(cbop_year, 
-                                       by=names(cbop_year)[!names(cbop_year) %in% 
-                                                    c('file','war_wynagrodzenieBrutto',
-                                                      'war_wynagrodzenieBruttoZTypemStawki')], 
-                                       fromLast = TRUE) == FALSE)
-  vector_year_stat <- append(vector_year_stat, length(cbop_year$hash))
-
-  #Prolonged job offers and actualised job offers
-  cbop_year <- cbop_year %>% filter(duplicated(cbop_year, 
-                                       by=names(cbop_year)[!names(cbop_year) %in% 
-                                                    c('file','poz_ofertaWaznaDo',
-                                                      'war_dataRozpoczeciaPracy')], 
-                                       fromLast = TRUE) == FALSE)
-  
-  cbop_year <- cbop_year %>% filter(duplicated(cbop_year, 
-                                       by=names(cbop_year)[!names(cbop_year) %in% 
-                                                    c('file','poz_ofertaWaznaDo',
-                                                      'war_dataZakonczeniaPracy')], 
-                                       fromLast = TRUE) == FALSE)
-  
-  cbop_year <- cbop_year %>% filter(duplicated(cbop_year, 
-                                       by=names(cbop_year)[!names(cbop_year) %in% 
-                                                    c('file','poz_ofertaWaznaDo',
-                                                      'war_dataRozpoczeciaPracy',
-                                                      'war_dataZakonczeniaPracy')], 
-                                       fromLast = TRUE) == FALSE)
-  vector_year_stat <- append(vector_year_stat, length(cbop_year$hash))
-  
-  #Job offers with different phone no.
-  cbop_dupes <- cbop_year %>% filter(duplicated(cbop_year, 
-                                       by=names(cbop_year)[!names(cbop_year) %in% 
-                                                    c('file','prac_osobaDoKontaktu',
-                                                      'prac_nrTelefonu')], 
-                                       fromLast = FALSE) == TRUE |
-                                      duplicated(cbop_year, 
-                                       by=names(cbop_year)[!names(cbop_year) %in% 
-                                                    c('file','prac_osobaDoKontaktu',
-                                                      'prac_nrTelefonu')], 
-                                       fromLast = TRUE) == TRUE) %>% 
-    select(hash, poz_lWolnychMiejsc, poz_lWolnychMiejscDlaNiepeln) %>% group_by(hash) %>%
-    summarise(poz_lWolnychMiejsc = sum(poz_lWolnychMiejsc), 
-              poz_lWolnychMiejscDlaNiepeln = sum(poz_lWolnychMiejscDlaNiepeln))
-  
-  cbop_year <- cbop_year %>% filter(duplicated(cbop_year, 
-                                       by=names(cbop_year)[!names(cbop_year) %in% 
-                                                    c('file','prac_osobaDoKontaktu',
-                                                      'prac_nrTelefonu')], 
-                                       fromLast = FALSE) == FALSE)
-  
-  for(i in cbop_dupes$hash) {
-    cbop_year$poz_lWolnychMiejsc[cbop_year$hash == i] <-
-      cbop_dupes$poz_lWolnychMiejsc[cbop_dupes$hash == i]
-    cbop_year$poz_lWolnychMiejscDlaNiepeln[cbop_year$hash == i] <-
-      cbop_dupes$poz_lWolnychMiejscDlaNiepeln[cbop_dupes$hash == i]
-  }
-  rm(cbop_dupes)
-  vector_year_stat <- append(vector_year_stat, length(cbop_year$hash))
-  
-  #Job offers with different vacancies
-  cbop_dupes <- cbop_year %>% filter(duplicated(cbop_year, 
-                                       by=names(cbop_year)[!names(cbop_year) %in% 
-                                                    c('file','poz_lWolnychMiejsc',
-                                                      'poz_lWolnychMiejscDlaNiepeln')], 
-                                       fromLast = FALSE) == TRUE |
-                                      duplicated(cbop_year, 
-                                       by=names(cbop_year)[!names(cbop_year) %in% 
-                                                    c('file','poz_lWolnychMiejsc',
-                                                      'poz_lWolnychMiejscDlaNiepeln')], 
-                                       fromLast = TRUE) == TRUE) %>% 
-    select(hash, poz_lWolnychMiejsc, poz_lWolnychMiejscDlaNiepeln) %>% group_by(hash) %>%
-    summarise(poz_lWolnychMiejsc = sum(poz_lWolnychMiejsc), 
-              poz_lWolnychMiejscDlaNiepeln = sum(poz_lWolnychMiejscDlaNiepeln))
-  
-  cbop_year <- cbop_year %>% filter(duplicated(cbop_year, 
-                                       by=names(cbop_year)[!names(cbop_year) %in% 
-                                                    c('file','poz_lWolnychMiejsc',
-                                                      'poz_lWolnychMiejscDlaNiepeln')], 
-                                       fromLast = FALSE) == FALSE)
-  
-  for(i in cbop_dupes$hash) {
-    cbop_year$poz_lWolnychMiejsc[cbop_year$hash == i] <-
-      cbop_dupes$poz_lWolnychMiejsc[cbop_dupes$hash == i]
-    cbop_year$poz_lWolnychMiejscDlaNiepeln[cbop_year$hash == i] <-
-      cbop_dupes$poz_lWolnychMiejscDlaNiepeln[cbop_dupes$hash == i]
-  }
-  rm(cbop_dupes)
-  vector_year_stat <- append(vector_year_stat, length(cbop_year$hash))
-  
-  #Add new column
-  stats_remove_tab <<- cbind(stats_remove_tab, year = vector_year_stat)
-  
-  return(cbop_year)
-}
-```
-
-```{r}
 #Table for stats
-stats_remove_tab <- data.table(duplication_type = c('Base value', 'Identical', 'Spelling mistakes', 'Prolonged', 'Actualised - different start date', 'Actualised - different end date', 'Actualised - different salary', 'Prolonged and actualised', 'Different contact data', 'Different number of vacancies'))
-
 stats_all_tab <- c()
+
+stats_remove_tab <- data.table(duplication_type = c('Base value', 'Identical', 'Spelling mistakes', 'Prolonged', 'Actualised - different start date', 'Actualised - different end date', 'Actualised - different salary', 'Prolonged and actualised', 'Different contact data', 'Different number of vacancies'))
 ```
 
 ```{r}
-#2020
-cbop_2020 <- list()
-files <- Sys.glob('data\\2020\\*.json')
-cbop_2020 <- create_table(cbop_2020, files)
-cbop_2020 <- remove_duplicates(cbop_2020)
-rm(files)
+#2020 3 quarter
+files <- 'data\\2020_09_30_full.json'
+cbop_2020_3 <- create_table(files)
 ```
 
 ```{r}
-#2021
-files <- Sys.glob('data\\2021\\*.json') 
-
-cbop_2021_1 <- list()
-files_1 <- files[1:floor(length(files)/2)]
-cbop_2021_1 <- create_table(cbop_2021_1, files_1)
-cbop_2021_1 <- remove_duplicates(cbop_2021_1)
-
-cbop_2021_2 <- list()
-files_2 <- files[(1+floor(length(files)/2)):length(files)]
-cbop_2021_2 <- create_table(cbop_2021_2, files_2)
-cbop_2021_2 <- remove_duplicates(cbop_2021_2)
-
-rm(files)
-rm(files_1)
-rm(files_2)
-
-cbop_2021 <- rbindlist(list(cbop_2021_1, cbop_2021_2))
-rm(cbop_2021_1)
-rm(cbop_2021_2)
-
-cbop_2021 <- remove_duplicates(cbop_2021)
+#2020 4 quarter
+files <- 'data\\2020_12_31_full.json'
+cbop_2020_4 <- create_table(files)
 ```
 
 ```{r}
-#2022
-cbop_2022 <- list()
-files <- Sys.glob('data\\2022\\*.json')
-cbop_2022 <- create_table(cbop_2022, files)
-cbop_2022 <- remove_duplicates(cbop_2022)
-rm(files)
+#2021 1 quarter
+files <- 'data\\2021_03_31_full.json'
+cbop_2021_1 <- create_table(files)
 ```
 
 ```{r}
-#2020-2022 All
-cbop_all <- rbindlist(list(cbop_2020, cbop_2021, cbop_2022))
-cbop_all <- remove_duplicates(cbop_all)
+#2021 2 quarter
+files <- 'data\\2021_06_30_full.json'
+cbop_2021_2 <- create_table(files)
 ```
+
+```{r}
+#2021 3 quarter
+files <- 'data\\2021_09_30_full.json'
+cbop_2021_3 <- create_table(files)
+```
+
+```{r}
+#2021 4 quarter
+files <- 'data\\2021_12_31_full.json'
+cbop_2021_4 <- create_table(files)
+```
+
+```{r}
+#2022 1 quarter
+files <- 'data\\2021_03_31_full.json'
+cbop_2022_1 <- create_table(files)
+```
+____________
 
 ```{r}
 #Table with stats duplicates - n
