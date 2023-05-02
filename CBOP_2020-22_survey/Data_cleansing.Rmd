@@ -48,8 +48,6 @@ read_json_cbop <- function(file) {
   
   cbop_quarter[, poz_kodZawodu := str_remove(poz_kodZawodu, "RPd057\\|")]
   cbop_quarter[, poz_grupaZawodu := substr(poz_kodZawodu, 1, 1)]
-  cbop_quarter[, kod_pocztowy := str_extract(war_miejscePracy,
-                                                        "\\d{2}\\-\\d{3}")]
   
   for (p in c(0, 1, 9)) {
     cbop_quarter[str_detect(pra_regon, sprintf("^%s{9}", p)), pra_regon := NA]
@@ -124,8 +122,27 @@ meet_definition <- function(cbop_quarter) {
 ```{r}
 remove_duplication <- function(cbop_quarter, stats_vec_quarter) {
   
-  #TODO
+  #second error - system error
+  cbop_quarter <- cbop_quarter %>% 
+    filter(duplicated(cbop_quarter, 
+                      by=names(cbop_quarter)[!names(cbop_quarter) %in% 
+                                               c('hash', 'poz_identyfikatorOferty')],
+                      fromLast = TRUE) == FALSE)
   
+  #Stats - second error - system error
+  stats_vec_quarter <- append(stats_vec_quarter, sum(cbop_quarter$poz_lWolnychMiejsc))
+  
+  #second error - the same company, job position and number of vacancy
+  cbop_quarter <- cbop_quarter %>% 
+    filter(duplicated(cbop_quarter, 
+                      by=names(cbop_quarter)[names(cbop_quarter) %in% 
+                                               c('pra_nip', 'pra_regon', 'poz_kodZawodu',
+                                                 'poz_lWolnychMiejsc', 'war_stanowisko',
+                                                 'war_miejscePracy')],
+                      fromLast = TRUE) == FALSE)
+  
+  #Stats - second error - the same company, job position and number of vacancy
+  stats_vec_quarter <- append(stats_vec_quarter, sum(cbop_quarter$poz_lWolnychMiejsc))
   
   return(list("cbop"= cbop_quarter, "stats" = stats_vec_quarter))
 }
@@ -146,7 +163,7 @@ create_table <- function(file) {
   
   stats_tab <<- cbind(stats_tab, year = stats_vec_quarter)
   
-  columns_to_keep <- c('hash', 'pra_osobaDoKontaktu', 'pra_nrTelefonu', 'pra_nip', 'pra_nazwaUrzeduPracy', 'pra_regon', 'poz_kodZawodu', 'poz_grupaZawodu', 'poz_zawod', 'poz_lWolnychMiejsc', 'poz_kodKategoriiOferty', 'poz_udostepnionoDoEURES', 'poz_dlaPoborowych', 'poz_ofertaDlaOsobZarej', 'poz_identyfikatorOferty', 'poz_lWolnychMiejscDlaNiepeln', 'poz_finansZPfron', 'poz_ofertaWaznaDo', 'poz_ofertaZgloszonaPrzez', 'poz_ofertaZgloszonaPrzezKodJednostki', 'poz_dataUdostepnieniaOferty', 'poz_dataPrzyjZglosz', 'war_dataZakonczeniaPracy', 'war_miejscePracyCzlonDrugi', 'war_zakresObowiazkow', 'war_opisOferty', 'war_rodzajZatrudnienia', 'war_miejscePracyCzlonPierwszy', 'war_lGodzinWMiesiacu', 'war_kodZmianowosci', 'war_wojewodztwo', 'war_kodWojewodztwa', 'war_ulica', 'war_powiat', 'war_kodPowiatu', 'war_zawod', 'war_gmina', 'war_opisWynagrodzenia', 'war_pracaWWolneDni', 'war_wynagrodzenieBrutto', 'war_nrBudynku', 'war_kodSystemuWynagradzania', 'war_nrLokalu', 'war_miejscePracy', 'war_lGodzinWTygodniu', 'war_stanowisko', 'war_dataRozpoczeciaPracy', 'war_wymiarEtatu', 'war_miejscowosc', 'war_zatrOdZaraz', 'war_kodMiejscowosci', 'war_pracaStala', 'war_wynagrodzenieBruttoZTypemStawki', 'war_zmianowosc', 'war_pracaTymczasowa', 'war_kodRodzajuZatrudnienia', 'kod_pocztowy')
+  columns_to_keep <- c('hash', 'pra_osobaDoKontaktu', 'pra_nrTelefonu', 'pra_nip', 'pra_nazwaUrzeduPracy', 'pra_regon', 'poz_kodZawodu', 'poz_grupaZawodu', 'poz_zawod', 'poz_lWolnychMiejsc', 'poz_kodKategoriiOferty', 'poz_udostepnionoDoEURES', 'poz_dlaPoborowych', 'poz_ofertaDlaOsobZarej', 'poz_identyfikatorOferty', 'poz_lWolnychMiejscDlaNiepeln', 'poz_finansZPfron', 'poz_ofertaWaznaDo', 'poz_ofertaZgloszonaPrzez', 'poz_ofertaZgloszonaPrzezKodJednostki', 'poz_dataUdostepnieniaOferty', 'poz_dataPrzyjZglosz', 'war_dataZakonczeniaPracy', 'war_miejscePracyCzlonDrugi', 'war_zakresObowiazkow', 'war_opisOferty', 'war_rodzajZatrudnienia', 'war_miejscePracyCzlonPierwszy', 'war_lGodzinWMiesiacu', 'war_kodZmianowosci', 'war_wojewodztwo', 'war_kodWojewodztwa', 'war_ulica', 'war_powiat', 'war_kodPowiatu', 'war_zawod', 'war_gmina', 'war_opisWynagrodzenia', 'war_pracaWWolneDni', 'war_wynagrodzenieBrutto', 'war_nrBudynku', 'war_kodSystemuWynagradzania', 'war_nrLokalu', 'war_miejscePracy', 'war_lGodzinWTygodniu', 'war_stanowisko', 'war_dataRozpoczeciaPracy', 'war_wymiarEtatu', 'war_miejscowosc', 'war_zatrOdZaraz', 'war_kodMiejscowosci', 'war_pracaStala', 'war_wynagrodzenieBruttoZTypemStawki', 'war_zmianowosc', 'war_pracaTymczasowa', 'war_kodRodzajuZatrudnienia')
   cbop_quarter <- cbop_quarter[, ..columns_to_keep]
   
   return(cbop_quarter)
@@ -155,7 +172,7 @@ create_table <- function(file) {
 
 ```{r}
 #Table for stats
-stats_tab <- data.table(error_type = c('Base value', 'First error - incorrect nip or regon', 'First error - job offert from outside Poland', 'First error - incorrect contract type '))
+stats_tab <- data.table(error_type = c('Base value', 'First error - incorrect nip or regon', 'First error - job offert from outside Poland', 'First error - incorrect contract type ', 'Second error - system error', 'Second error - the same company, job position and number of vacancy'))
 ```
 
 ```{r}
@@ -173,11 +190,14 @@ for (i in 1:11) {
 
 ```{r}
 cbop_all <- rbindlist(cbop_vec)
+result <- remove_duplication(cbop_all, c())
+cbop_all <- result$cbop
 ```
 
 ```{r}
 #Table with stats - n
 stats_tab[, 'all'] <- rowSums(stats_tab[,2:12])
+stats_tab[5:6, 'all'] <- result$stats
 ```
 
 ```{r}
