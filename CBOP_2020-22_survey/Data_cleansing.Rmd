@@ -9,11 +9,10 @@ library(data.table)
 library(lubridate)
 library(tidyverse)
 library(stringi)
-library(scales)
 ```
 
 ```{r}
-read_process_cbop <- function(file) {
+read_json_cbop <- function(file) {
   
   cbop <- fload(file)
   cbop_df <- rbindlist(cbop)
@@ -46,8 +45,26 @@ read_process_cbop <- function(file) {
   cbop_quarter[, pra_regon := ifelse(pra_regon == "", NA, pra_regon)]
   cbop_quarter[, pra_regon := ifelse(nchar(pra_regon) == 8, 
                                      paste0("0", pra_regon), pra_regon)]
+  
+  cbop_quarter[, poz_kodZawodu := str_remove(poz_kodZawodu, "RPd057\\|")]
+  cbop_quarter[, poz_grupaZawodu := substr(poz_kodZawodu, 1, 1)]
   cbop_quarter[, kod_pocztowy := str_extract(war_miejscePracy,
                                                         "\\d{2}\\-\\d{3}")]
+  
+  for (p in c(0, 1, 9)) {
+    cbop_quarter[str_detect(pra_regon, sprintf("^%s{9}", p)), pra_regon := NA]
+  }
+  
+  cbop_quarter[, pra_regon := str_pad(pra_regon, 14, "right", pad = "0")]
+  
+  cbop_quarter[, pra_nip := str_remove_all(pra_nip, "\\D")]
+  cbop_quarter[, pra_nip := ifelse(pra_nip == "", NA, pra_nip)]
+  
+  for (p in 0:9) {
+    cbop_quarter[str_detect(pra_nip, sprintf("^%s{9}", p)), pra_nip := NA]
+  }
+  
+  cbop_quarter <- cbop_quarter[!(is.na(pra_regon) & is.na(pra_nip))]
   
   daty <-
     c(
@@ -64,45 +81,25 @@ read_process_cbop <- function(file) {
 ```
 
 ```{r}
-#Chosen columns to keep
-columns_to_keep <- c('hash', 'pra_osobaDoKontaktu', 'pra_nrTelefonu', 'pra_nip', 'pra_nazwaUrzeduPracy', 'pra_regon', 'poz_kodZawodu', 'poz_zawod', 'poz_lWolnychMiejsc', 'poz_kodKategoriiOferty', 'poz_udostepnionoDoEURES', 'poz_dlaPoborowych', 'poz_ofertaDlaOsobZarej', 'poz_identyfikatorOferty', 'poz_lWolnychMiejscDlaNiepeln', 'poz_finansZPfron', 'poz_ofertaWaznaDo', 'poz_ofertaZgloszonaPrzez', 'poz_ofertaZgloszonaPrzezKodJednostki', 'poz_dataUdostepnieniaOferty', 'poz_dataPrzyjZglosz', 'war_dataZakonczeniaPracy', 'war_miejscePracyCzlonDrugi', 'war_zakresObowiazkow', 'war_opisOferty', 'war_rodzajZatrudnienia', 'war_miejscePracyCzlonPierwszy', 'war_lGodzinWMiesiacu', 'war_kodZmianowosci', 'war_wojewodztwo', 'war_kodWojewodztwa', 'war_ulica', 'war_powiat', 'war_kodPowiatu', 'war_zawod', 'war_gmina', 'war_opisWynagrodzenia', 'war_pracaWWolneDni', 'war_wynagrodzenieBrutto', 'war_nrBudynku', 'war_kodSystemuWynagradzania', 'war_nrLokalu', 'war_miejscePracy', 'war_lGodzinWTygodniu', 'war_stanowisko', 'war_dataRozpoczeciaPracy', 'war_wymiarEtatu', 'war_miejscowosc', 'war_zatrOdZaraz', 'war_kodMiejscowosci', 'war_pracaStala', 'war_wynagrodzenieBruttoZTypemStawki', 'war_zmianowosc', 'war_pracaTymczasowa', 'war_kodRodzajuZatrudnienia', 'kod_pocztowy')
-```
-
-```{r}
-create_table <- function(file) {
-  
-  cbop_quarter <- read_process_cbop(file)
+meet_definition <- function(cbop_quarter) {
   
   #Stats - base value
   stats_vec_quarter <- c()
   stats_vec_quarter <- append(stats_vec_quarter, sum(cbop_quarter$poz_lWolnychMiejsc))
   
   #first error - incorrect nip or regon
-  for (p in c(0, 1, 9)) {
-    cbop_quarter[str_detect(pra_regon, sprintf("^%s{9}", p)), pra_regon := NA]
-  }
+  #TODO
   
-  cbop_quarter[, pra_regon := str_pad(pra_regon, 14, "right", pad = "0")]
-  
-  cbop_quarter[, pra_nip := str_remove_all(pra_nip, "\\D")]
-  cbop_quarter[, pra_nip := ifelse(pra_nip == "", NA, pra_nip)]
-  
-  for (p in 0:9) {
-    cbop_quarter[str_detect(pra_nip, sprintf("^%s{9}", p)), pra_nip := NA]
-  }
-  
-  cbop_quarter <- cbop_quarter[!(is.na(pra_regon) & is.na(pra_nip))]
-  
-  #Stats - first error
+  #Stats - first error - incorrect nip or regon
   stats_vec_quarter <- append(stats_vec_quarter, sum(cbop_quarter$poz_lWolnychMiejsc))
   
-  #second error - job offert not in Poland
+  #first error - job offert from outside Poland
   cbop_quarter <- cbop_quarter[war_kraj == "Polska"]
   
-  #Stats - second error
+  #Stats - first error - job offert from outside Poland
   stats_vec_quarter <- append(stats_vec_quarter, sum(cbop_quarter$poz_lWolnychMiejsc))
   
-  #third error - incorrect contract type 
+  #first error - incorrect contract type 
   umowy_typ <- c("Umowa o pracę na okres próbny",
                   "Umowa o pracę na czas określony",
                   "Umowa o pracę na czas nieokreślony",
@@ -117,11 +114,39 @@ create_table <- function(file) {
                   "Delegowanie")
   cbop_quarter <- cbop_quarter[war_rodzajZatrudnienia %in% umowy_typ]
   
-  #Stats - third error
+  #Stats - first error - incorrect contract type 
   stats_vec_quarter <- append(stats_vec_quarter, sum(cbop_quarter$poz_lWolnychMiejsc))
+  
+  return(list("cbop"= cbop_quarter, "stats" = stats_vec_quarter))
+}
+```
+
+```{r}
+remove_duplication <- function(cbop_quarter, stats_vec_quarter) {
+  
+  #TODO
+  
+  
+  return(list("cbop"= cbop_quarter, "stats" = stats_vec_quarter))
+}
+```
+
+```{r}
+create_table <- function(file) {
+  
+  cbop_quarter <- read_json_cbop(file)
+  
+  result <- meet_definition(cbop_quarter)
+  cbop_quarter <- result$cbop
+  stats_vec_quarter <- result$stats
+  
+  result <- remove_duplication(cbop_quarter, stats_vec_quarter)
+  cbop_quarter <- result$cbop
+  stats_vec_quarter <- result$stats
   
   stats_tab <<- cbind(stats_tab, year = stats_vec_quarter)
   
+  columns_to_keep <- c('hash', 'pra_osobaDoKontaktu', 'pra_nrTelefonu', 'pra_nip', 'pra_nazwaUrzeduPracy', 'pra_regon', 'poz_kodZawodu', 'poz_grupaZawodu', 'poz_zawod', 'poz_lWolnychMiejsc', 'poz_kodKategoriiOferty', 'poz_udostepnionoDoEURES', 'poz_dlaPoborowych', 'poz_ofertaDlaOsobZarej', 'poz_identyfikatorOferty', 'poz_lWolnychMiejscDlaNiepeln', 'poz_finansZPfron', 'poz_ofertaWaznaDo', 'poz_ofertaZgloszonaPrzez', 'poz_ofertaZgloszonaPrzezKodJednostki', 'poz_dataUdostepnieniaOferty', 'poz_dataPrzyjZglosz', 'war_dataZakonczeniaPracy', 'war_miejscePracyCzlonDrugi', 'war_zakresObowiazkow', 'war_opisOferty', 'war_rodzajZatrudnienia', 'war_miejscePracyCzlonPierwszy', 'war_lGodzinWMiesiacu', 'war_kodZmianowosci', 'war_wojewodztwo', 'war_kodWojewodztwa', 'war_ulica', 'war_powiat', 'war_kodPowiatu', 'war_zawod', 'war_gmina', 'war_opisWynagrodzenia', 'war_pracaWWolneDni', 'war_wynagrodzenieBrutto', 'war_nrBudynku', 'war_kodSystemuWynagradzania', 'war_nrLokalu', 'war_miejscePracy', 'war_lGodzinWTygodniu', 'war_stanowisko', 'war_dataRozpoczeciaPracy', 'war_wymiarEtatu', 'war_miejscowosc', 'war_zatrOdZaraz', 'war_kodMiejscowosci', 'war_pracaStala', 'war_wynagrodzenieBruttoZTypemStawki', 'war_zmianowosc', 'war_pracaTymczasowa', 'war_kodRodzajuZatrudnienia', 'kod_pocztowy')
   cbop_quarter <- cbop_quarter[, ..columns_to_keep]
   
   return(cbop_quarter)
@@ -130,17 +155,16 @@ create_table <- function(file) {
 
 ```{r}
 #Table for stats
-stats_tab <- data.table(error_type = c('Base value', 'First error', 'Second error', 
-                                       'Third error'))
+stats_tab <- data.table(error_type = c('Base value', 'First error - incorrect nip or regon', 'First error - job offert from outside Poland', 'First error - incorrect contract type '))
 ```
 
 ```{r}
-cbop_vec <- vector(mode = "list", length = 7)
+cbop_vec <- vector(mode = "list", length = 11)
 files <- Sys.glob('data\\*.json')
 
-for (i in 1:7) {
-  cbop <- create_table(files[i])
-  cbop_vec[[i]] <- cbop
+for (i in 1:11) {
+  cbop_vec[[i]] <- create_table(files[i])
+  
   file_name <- str_remove_all(files[i], '(data\\\\|_full.json)')
   names(cbop_vec)[i] <- file_name
   colnames(stats_tab)[i + 1] <- file_name
@@ -152,19 +176,13 @@ cbop_all <- rbindlist(cbop_vec)
 ```
 
 ```{r}
-rm(cbop_vec)
-rm(files)
-rm(file_name)
-rm(i)
-```
-
-```{r}
 #Table with stats - n
-stats_tab[, 'all'] <- rowSums(stats_tab[,2:8])
+stats_tab[, 'all'] <- rowSums(stats_tab[,2:12])
 ```
 
 ```{r}
 #Create RDS files
+saveRDS(cbop_vec, file = "cbop_vec.rds")
 saveRDS(cbop_all, file = "cbop_all.rds")
 saveRDS(stats_tab, file = "stats_tab.rds")
 ```
