@@ -2,8 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
-*.xlsx
 */data
 */.RDataTmp*
-*.rds
-*.pdf
+*nb.html

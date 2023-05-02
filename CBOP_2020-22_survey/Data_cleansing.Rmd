@@ -14,6 +14,7 @@ library(scales)
 
 ```{r}
 read_process_cbop <- function(file) {
+  
   cbop <- fload(file)
   cbop_df <- rbindlist(cbop)
   
@@ -34,35 +35,19 @@ read_process_cbop <- function(file) {
       ifelse(is.null(x), NA, x))
   pozostale <- rbindlist(pozostale)
   setnames(pozostale, names(pozostale), paste0("poz_", names(pozostale)))
-  cbop_details <- cbind(pracodawca, warunki, pozostale)
   
-  cbop_details[, hash := cbop_df$hash]
-  cbop_details[, typOferty := cbop_df$typOferty]
-  cbop_details[, zagranicznaEures := cbop_df$zagranicznaEures]
+  cbop_quarter <- cbind(pracodawca, warunki, pozostale)
   
-  cbop_details[, pra_regon := str_remove_all(pra_regon, "\\D")]
-  cbop_details[, pra_regon := ifelse(pra_regon == "", NA, pra_regon)]
-  cbop_details[, pra_regon := ifelse(nchar(pra_regon) == 8, 
+  cbop_quarter[, hash := cbop_df$hash]
+  cbop_quarter[, typOferty := cbop_df$typOferty]
+  cbop_quarter[, zagranicznaEures := cbop_df$zagranicznaEures]
+  
+  cbop_quarter[, pra_regon := str_remove_all(pra_regon, "\\D")]
+  cbop_quarter[, pra_regon := ifelse(pra_regon == "", NA, pra_regon)]
+  cbop_quarter[, pra_regon := ifelse(nchar(pra_regon) == 8, 
                                      paste0("0", pra_regon), pra_regon)]
-  cbop_details[, kod_pocztowy := str_extract(war_miejscePracy,
+  cbop_quarter[, kod_pocztowy := str_extract(war_miejscePracy,
                                                         "\\d{2}\\-\\d{3}")]
-  
-  for (p in c(0, 1, 9)) {
-    cbop_details[str_detect(pra_regon, sprintf("^%s{9}", p)), pra_regon := NA]
-  }
-  
-  cbop_details[, pra_regon := str_pad(pra_regon, 14, "right", pad = "0")]
-  
-  ## nip id
-  cbop_details[, pra_nip := str_remove_all(pra_nip, "\\D")]
-  cbop_details[, pra_nip := ifelse(pra_nip == "", NA, pra_nip)]
-  
-  for (p in 0:9) {
-    cbop_details[str_detect(pra_nip, sprintf("^%s{9}", p)), pra_nip := NA]
-  }
-  
-  ## bez identyfikatorów - usuwamy
-  cbop_details <- cbop_details[!(is.na(pra_regon) & is.na(pra_nip))]
   
   daty <-
     c(
@@ -72,10 +57,9 @@ read_process_cbop <- function(file) {
       "poz_ofertaWaznaDo",
       "poz_dataPrzyjZglosz"
     )
+  cbop_quarter[, (daty) := lapply(.SD, as.Date, format = "%d.%m.%Y"), .SDcols = daty]
   
-  cbop_details[, (daty) := lapply(.SD, as.Date, format = "%d.%m.%Y"), .SDcols = daty]
-  
-  return(cbop_details)
+  return(cbop_quarter)
 }
 ```
 
@@ -85,13 +69,40 @@ columns_to_keep <- c('hash', 'pra_osobaDoKontaktu', 'pra_nrTelefonu', 'pra_nip',
 ```
 
 ```{r}
-create_table <- function(files) {
+create_table <- function(file) {
   
-  cbop_year <- read_process_cbop(files)
+  cbop_quarter <- read_process_cbop(file)
   
-  stats_all_tab <<- append(stats_all_tab, sum(cbop_year$poz_lWolnychMiejsc, na.rm = TRUE))
+  #Stats - base value
+  stats_vec_quarter <- c()
+  stats_vec_quarter <- append(stats_vec_quarter, sum(cbop_quarter$poz_lWolnychMiejsc))
   
-  #requirements
+  #first error - incorrect nip or regon
+  for (p in c(0, 1, 9)) {
+    cbop_quarter[str_detect(pra_regon, sprintf("^%s{9}", p)), pra_regon := NA]
+  }
+  
+  cbop_quarter[, pra_regon := str_pad(pra_regon, 14, "right", pad = "0")]
+  
+  cbop_quarter[, pra_nip := str_remove_all(pra_nip, "\\D")]
+  cbop_quarter[, pra_nip := ifelse(pra_nip == "", NA, pra_nip)]
+  
+  for (p in 0:9) {
+    cbop_quarter[str_detect(pra_nip, sprintf("^%s{9}", p)), pra_nip := NA]
+  }
+  
+  cbop_quarter <- cbop_quarter[!(is.na(pra_regon) & is.na(pra_nip))]
+  
+  #Stats - first error
+  stats_vec_quarter <- append(stats_vec_quarter, sum(cbop_quarter$poz_lWolnychMiejsc))
+  
+  #second error - job offert not in Poland
+  cbop_quarter <- cbop_quarter[war_kraj == "Polska"]
+  
+  #Stats - second error
+  stats_vec_quarter <- append(stats_vec_quarter, sum(cbop_quarter$poz_lWolnychMiejsc))
+  
+  #third error - incorrect contract type 
   umowy_typ <- c("Umowa o pracę na okres próbny",
                   "Umowa o pracę na czas określony",
                   "Umowa o pracę na czas nieokreślony",
@@ -104,110 +115,56 @@ create_table <- function(files) {
                   "Spółdzielcza umowa o pracę",
                   "Powołanie",
                   "Delegowanie")
-  cbop_year <- cbop_year[war_rodzajZatrudnienia %in% umowy_typ]
-  cbop_year <- cbop_year[war_kraj == "Polska"]
+  cbop_quarter <- cbop_quarter[war_rodzajZatrudnienia %in% umowy_typ]
   
-  cbop_year <- cbop_year[, ..columns_to_keep]
+  #Stats - third error
+  stats_vec_quarter <- append(stats_vec_quarter, sum(cbop_quarter$poz_lWolnychMiejsc))
   
-  stats_all_tab <<- append(stats_all_tab, sum(cbop_year$poz_lWolnychMiejsc, na.rm = TRUE))
+  stats_tab <<- cbind(stats_tab, year = stats_vec_quarter)
   
-  return(cbop_year)
+  cbop_quarter <- cbop_quarter[, ..columns_to_keep]
+  
+  return(cbop_quarter)
 }
 ```
 
 ```{r}
 #Table for stats
-stats_all_tab <- c()
-
-stats_remove_tab <- data.table(duplication_type = c('Base value', 'Identical', 'Spelling mistakes', 'Prolonged', 'Actualised - different start date', 'Actualised - different end date', 'Actualised - different salary', 'Prolonged and actualised', 'Different contact data', 'Different number of vacancies'))
+stats_tab <- data.table(error_type = c('Base value', 'First error', 'Second error', 
+                                       'Third error'))
 ```
 
 ```{r}
-#2020 3 quarter
-files <- 'data\\2020_09_30_full.json'
-cbop_2020_3 <- create_table(files)
+cbop_vec <- vector(mode = "list", length = 7)
+files <- Sys.glob('data\\*.json')
+
+for (i in 1:7) {
+  cbop <- create_table(files[i])
+  cbop_vec[[i]] <- cbop
+  file_name <- str_remove_all(files[i], '(data\\\\|_full.json)')
+  names(cbop_vec)[i] <- file_name
+  colnames(stats_tab)[i + 1] <- file_name
+}
 ```
 
 ```{r}
-#2020 4 quarter
-files <- 'data\\2020_12_31_full.json'
-cbop_2020_4 <- create_table(files)
+cbop_all <- rbindlist(cbop_vec)
 ```
 
 ```{r}
-#2021 1 quarter
-files <- 'data\\2021_03_31_full.json'
-cbop_2021_1 <- create_table(files)
+rm(cbop_vec)
+rm(files)
+rm(file_name)
+rm(i)
 ```
 
 ```{r}
-#2021 2 quarter
-files <- 'data\\2021_06_30_full.json'
-cbop_2021_2 <- create_table(files)
-```
-
-```{r}
-#2021 3 quarter
-files <- 'data\\2021_09_30_full.json'
-cbop_2021_3 <- create_table(files)
-```
-
-```{r}
-#2021 4 quarter
-files <- 'data\\2021_12_31_full.json'
-cbop_2021_4 <- create_table(files)
-```
-
-```{r}
-#2022 1 quarter
-files <- 'data\\2021_03_31_full.json'
-cbop_2022_1 <- create_table(files)
-```
-____________
-
-```{r}
-#Table with stats duplicates - n
-colnames(stats_remove_tab) <- c('duplication_type', '2020', '2021_1', '2021_2', '2021_s', '2022', 'all')
-
-stats_remove_tab[, '2021'] <- stats_remove_tab[,'2021_1'] + stats_remove_tab[,'2021_2'] - cumsum(rbind(stats_remove_tab[1,'2021_s'], stats_remove_tab[1:9,'2021_s']) - stats_remove_tab[,'2021_s'])
-stats_remove_tab <- subset(stats_remove_tab, select = -c(3,4,5))
-
-stats_remove_tab[, 'all'] <- stats_remove_tab[,'2021'] + stats_remove_tab[,'2020'] + stats_remove_tab[,'2022'] - cumsum(rbind(stats_remove_tab[1,'all'], stats_remove_tab[1:9,'all']) - stats_remove_tab[,'all'])
-
-stats_remove_tab <- stats_remove_tab %>% select('duplication_type', '2020', '2021', '2022', 'all')
-
-stats_remove_tab <- rbind(stats_remove_tab, cbind('duplication_type' = 'Sum of duplicates', stats_remove_tab[1,2:5]-stats_remove_tab[10,2:5]))
-```
-
-```{r}
-#Table with stats duplicates - %
-stats_remove_tab_p <- cbind(stats_remove_tab[,1], rbind(stats_remove_tab[1,2:5], stats_remove_tab[1:10,2:5]) - stats_remove_tab[,2:5])
-stats_remove_tab_p <- stats_remove_tab_p[-c(1,2,11),]
-
-stats_remove_tab_p[,2:5] <- cbind(
-  list(percent(round(as.numeric(unlist(prop.table(stats_remove_tab_p[,2]))),digit = 5))),
-  list(percent(round(as.numeric(unlist(prop.table(stats_remove_tab_p[,3]))),digit = 5))),
-  list(percent(round(as.numeric(unlist(prop.table(stats_remove_tab_p[,4]))),digit = 5))),
-  list(percent(round(as.numeric(unlist(prop.table(stats_remove_tab_p[,5]))),digit = 5))))
-```
-
-```{r}
-#Table with over-coverage errors
-stats_all_tab <- as.data.frame(matrix(stats_all_tab, nrow=2))
-stats_all_tab[,2] <- stats_all_tab[,2] + stats_all_tab[,3]
-stats_all_tab <- stats_all_tab[,-c(3)]
-stats_all_tab <- cbind(stats_all_tab, rowSums(stats_all_tab))
-colnames(stats_all_tab) <- c('2020', '2021', '2022', 'all')
-stats_all_tab <- rbind(stats_all_tab, stats_remove_tab[10,2:5])
+#Table with stats - n
+stats_tab[, 'all'] <- rowSums(stats_tab[,2:8])
 ```
 
 ```{r}
 #Create RDS files
-saveRDS(cbop_2020, file = "cbop_2020.rds")
-saveRDS(cbop_2021, file = "cbop_2021.rds")
-saveRDS(cbop_2022, file = "cbop_2022.rds")
 saveRDS(cbop_all, file = "cbop_all.rds")
-saveRDS(stats_remove_tab, file = "stats_remove_tab.rds")
-saveRDS(stats_remove_tab_p, file = "stats_remove_tab_p.rds")
-saveRDS(stats_all_tab, file = "stats_all_tab.rds")
+saveRDS(stats_tab, file = "stats_tab.rds")
 ```
