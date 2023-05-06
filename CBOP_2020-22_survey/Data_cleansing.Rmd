@@ -12,6 +12,10 @@ library(stringi)
 ```
 
 ```{r}
+data_regon_nip <- readRDS("data\\operat-artykul.rds")
+```
+
+```{r}
 read_json_cbop <- function(file) {
   
   cbop <- fload(file)
@@ -45,6 +49,7 @@ read_json_cbop <- function(file) {
   cbop_quarter[, pra_regon := ifelse(pra_regon == "", NA, pra_regon)]
   cbop_quarter[, pra_regon := ifelse(nchar(pra_regon) == 8, 
                                      paste0("0", pra_regon), pra_regon)]
+  cbop_quarter$pra_regon <- substr(cbop_quarter$pra_regon, 1, 9)
   
   cbop_quarter[, poz_kodZawodu := str_remove(poz_kodZawodu, "RPd057\\|")]
   cbop_quarter[, poz_grupaZawodu := substr(poz_kodZawodu, 1, 1)]
@@ -52,8 +57,6 @@ read_json_cbop <- function(file) {
   for (p in c(0, 1, 9)) {
     cbop_quarter[str_detect(pra_regon, sprintf("^%s{9}", p)), pra_regon := NA]
   }
-  
-  cbop_quarter[, pra_regon := str_pad(pra_regon, 14, "right", pad = "0")]
   
   cbop_quarter[, pra_nip := str_remove_all(pra_nip, "\\D")]
   cbop_quarter[, pra_nip := ifelse(pra_nip == "", NA, pra_nip)]
@@ -86,7 +89,8 @@ meet_definition <- function(cbop_quarter) {
   stats_vec_quarter <- append(stats_vec_quarter, sum(cbop_quarter$poz_lWolnychMiejsc))
   
   #first error - incorrect nip or regon
-  #TODO
+  cbop_quarter <- cbop_quarter[pra_regon %in% data_regon_nip$regon9]
+  cbop_quarter <- cbop_quarter[pra_nip %in% data_regon_nip$nip]
   
   #Stats - first error - incorrect nip or regon
   stats_vec_quarter <- append(stats_vec_quarter, sum(cbop_quarter$poz_lWolnychMiejsc))
@@ -198,6 +202,11 @@ cbop_all <- result$cbop
 #Table with stats - n
 stats_tab[, 'all'] <- rowSums(stats_tab[,2:12])
 stats_tab[5:6, 'all'] <- result$stats
+```
+
+```{r}
+#Table with stats - %
+#TODO
 ```
 
 ```{r}
