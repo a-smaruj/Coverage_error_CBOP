@@ -13,6 +13,7 @@ library(stringi)
 
 ```{r}
 data_regon_nip <- readRDS("data\\operat-artykul.rds")
+colnames(data_regon_nip)[2:3] <- c("pra_regon", "pra_nip")
 ```
 
 ```{r}
@@ -89,16 +90,16 @@ meet_definition <- function(cbop_quarter) {
   stats_vec_quarter <- append(stats_vec_quarter, sum(cbop_quarter$poz_lWolnychMiejsc))
   
   #first error - incorrect nip or regon
-  cbop_quarter <- cbop_quarter[pra_regon %in% data_regon_nip$regon9]
-  cbop_quarter <- cbop_quarter[pra_nip %in% data_regon_nip$nip]
+  cbop_quarter <- cbop_quarter[pra_regon %in% data_regon_nip$pra_regon | 
+                                 pra_nip %in% data_regon_nip$pra_nip]
   
   #Stats - first error - incorrect nip or regon
   stats_vec_quarter <- append(stats_vec_quarter, sum(cbop_quarter$poz_lWolnychMiejsc))
   
-  #first error - job offert from outside Poland
+  #first error - job offers from outside Poland
   cbop_quarter <- cbop_quarter[war_kraj == "Polska"]
   
-  #Stats - first error - job offert from outside Poland
+  #Stats - first error - job offers from outside Poland
   stats_vec_quarter <- append(stats_vec_quarter, sum(cbop_quarter$poz_lWolnychMiejsc))
   
   #first error - incorrect contract type 
@@ -195,7 +196,10 @@ for (i in 1:11) {
 ```{r}
 cbop_all <- rbindlist(cbop_vec)
 result <- remove_duplication(cbop_all, c())
-cbop_all <- result$cbop
+cbop_all <- merge(x = result$cbop, y = data_regon_nip %>% select(-"pra_nip") %>%
+                    filter(duplicated(data_regon_nip$pra_regon, 
+                                      fromLast = TRUE) == FALSE), 
+                        by = "pra_regon", all.x = TRUE)
 ```
 
 ```{r}
