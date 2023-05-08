@@ -171,6 +171,11 @@ create_table <- function(file) {
   columns_to_keep <- c('hash', 'pra_osobaDoKontaktu', 'pra_nrTelefonu', 'pra_nip', 'pra_nazwaUrzeduPracy', 'pra_regon', 'poz_kodZawodu', 'poz_grupaZawodu', 'poz_zawod', 'poz_lWolnychMiejsc', 'poz_kodKategoriiOferty', 'poz_udostepnionoDoEURES', 'poz_dlaPoborowych', 'poz_ofertaDlaOsobZarej', 'poz_identyfikatorOferty', 'poz_lWolnychMiejscDlaNiepeln', 'poz_finansZPfron', 'poz_ofertaWaznaDo', 'poz_ofertaZgloszonaPrzez', 'poz_ofertaZgloszonaPrzezKodJednostki', 'poz_dataUdostepnieniaOferty', 'poz_dataPrzyjZglosz', 'war_dataZakonczeniaPracy', 'war_miejscePracyCzlonDrugi', 'war_zakresObowiazkow', 'war_opisOferty', 'war_rodzajZatrudnienia', 'war_miejscePracyCzlonPierwszy', 'war_lGodzinWMiesiacu', 'war_kodZmianowosci', 'war_wojewodztwo', 'war_kodWojewodztwa', 'war_ulica', 'war_powiat', 'war_kodPowiatu', 'war_zawod', 'war_gmina', 'war_opisWynagrodzenia', 'war_pracaWWolneDni', 'war_wynagrodzenieBrutto', 'war_nrBudynku', 'war_kodSystemuWynagradzania', 'war_nrLokalu', 'war_miejscePracy', 'war_lGodzinWTygodniu', 'war_stanowisko', 'war_dataRozpoczeciaPracy', 'war_wymiarEtatu', 'war_miejscowosc', 'war_zatrOdZaraz', 'war_kodMiejscowosci', 'war_pracaStala', 'war_wynagrodzenieBruttoZTypemStawki', 'war_zmianowosc', 'war_pracaTymczasowa', 'war_kodRodzajuZatrudnienia')
   cbop_quarter <- cbop_quarter[, ..columns_to_keep]
   
+  cbop_quarter <- merge(x = cbop_quarter, y = data_regon_nip %>% select(-"pra_nip") %>%
+                    filter(duplicated(data_regon_nip$pra_regon, 
+                                      fromLast = TRUE) == FALSE), 
+                        by = "pra_regon", all.x = TRUE)
+  
   return(cbop_quarter)
 }
 ```
@@ -196,10 +201,7 @@ for (i in 1:11) {
 ```{r}
 cbop_all <- rbindlist(cbop_vec)
 result <- remove_duplication(cbop_all, c())
-cbop_all <- merge(x = result$cbop, y = data_regon_nip %>% select(-"pra_nip") %>%
-                    filter(duplicated(data_regon_nip$pra_regon, 
-                                      fromLast = TRUE) == FALSE), 
-                        by = "pra_regon", all.x = TRUE)
+cbop_all <- result$cbop
 ```
 
 ```{r}

@@ -4,181 +4,27 @@ output: html_notebook
 ---
 
 ```{r}
-library(RcppSimdJson)
-library(data.table)
-library(stringr)
+library(tidyverse)
+library(lubridate)
+library(reshape2)
 ```
 
 ```{r}
-read_process_cbop <- function(file, jobs_only = F, polska = F) {
-  cbop <- fload(file)
-  cbop_df <- rbindlist(cbop)
-  
-  warunki <-
-    lapply(cbop_df$warunkiPracyIPlacy, lapply, function(x)
-      ifelse(is.null(x), NA, x))
-  warunki <- rbindlist(warunki)
-  setnames(warunki, names(warunki), paste0("war_", names(warunki)))
-  
-  pracodawca <-
-    lapply(cbop_df$danePracodawcy, lapply, function(x)
-      ifelse(is.null(x), NA, x))
-  pracodawca <- rbindlist(pracodawca)
-  setnames(pracodawca, names(pracodawca), paste0("pra_", names(pracodawca)))
-  
-  pozostale <-
-    lapply(cbop_df$pozostaleDane, lapply, function(x)
-      ifelse(is.null(x), NA, x))
-  pozostale <- rbindlist(pozostale)
-  setnames(pozostale, names(pozostale), paste0("poz_", names(pozostale)))
-  cbop_details <- cbind(pracodawca, warunki, pozostale)
-  
-  cbop_details[, hash := cbop_df$hash]
-  cbop_details[, typOferty := cbop_df$typOferty]
-  cbop_details[, zagranicznaEures := cbop_df$zagranicznaEures]
-  
-  cbop_details[, pra_regon := str_remove_all(pra_regon, "\\D")]
-  cbop_details[, pra_regon := ifelse(pra_regon == "", NA, pra_regon)]
-  cbop_details[, pra_regon := ifelse(nchar(pra_regon) == 8, paste0("0", pra_regon), pra_regon)]
-  
-  for (p in c(0, 1, 9)) {
-    cat("detected", p, ":", sum(str_detect(
-      cbop_details$pra_regon, sprintf("^%s{9}", 1)
-    ), na.rm = T), "\n")
-    cbop_details[str_detect(pra_regon, sprintf("^%s{9}", p)), pra_regon := NA]
-  }
-  cbop_details[, pra_regon := str_pad(pra_regon, 14, "right", pad = "0")]
-  
-  ## nip id
-  cbop_details[, pra_nip := str_remove_all(pra_nip, "\\D")]
-  cbop_details[, pra_nip := ifelse(pra_nip == "", NA, pra_nip)]
-  
-  for (p in 0:9) {
-    cat("detected", p, ":", sum(str_detect(
-      cbop_details$pra_nip, sprintf("^%s{9}", 1)
-    ), na.rm = T), "\n")
-    cbop_details[str_detect(pra_nip, sprintf("^%s{9}", p)), pra_nip := NA]
-  }
-  
-  ## bez identyfikatorów - usuwamy
-  cbop_details <- cbop_details[!(is.na(pra_regon) & is.na(pra_nip))]
-  
-  umowy_typ <-
-    c(
-      "Umowa o pracę na okres próbny",
-      "Umowa o pracę na czas określony",
-      "Umowa o pracę na czas nieokreślony",
-      "Umowa o pracę w zastępstwie",
-      "Mianowanie",
-      "Wybór",
-      "Umowa o pomocy przy zbiorach",
-      "Umowa agencyjna",
-      "Umowa na czas wyk. określonej pracy",
-      "Spółdzielcza umowa o pracę",
-      "Powołanie",
-      "Delegowanie"
-    )
-  
-  
-  if (jobs_only) {
-    cbop_details <- cbop_details[war_rodzajZatrudnienia %in% umowy_typ]
-  }
-  
-  if (polska) {
-  	cbop_details <- cbop_details[war_kraj == "Polska"]
-  }
-  
-  
-  daty <-
-    c(
-      "war_dataZakonczeniaPracy",
-      "war_dataRozpoczeciaPracy",
-      "poz_dataUdostepnieniaOferty",
-      "poz_ofertaWaznaDo",
-      "poz_dataPrzyjZglosz"
-    )
-  
-  cbop_details[, (daty) := lapply(.SD, as.Date, format = "%d.%m.%Y"), .SDcols = daty]
-  
-  return(cbop_details)
-}
+#Load data
+cbop_all <- readRDS('data\\cbop_all.rds')
+model <- readRDS('data\\model.rds')
+cbop_vec <- readRDS('data\\cbop_vec.rds')
+stats_tab <-readRDS('data\\stats_tab.rds')
 ```
 
 ```{r}
-#Load Data
-
-
-CBOP_2020_09_30 <- read_process_cbop('data\\2020_09_30_full.json')
-CBOP_2020_12_31 <- read_process_cbop('data\\2020_12_31_full.json')
-CBOP_2021_03_31 <- read_process_cbop('data\\2021_03_31_full.json')
-CBOP_2021_06_30 <- read_process_cbop('data\\2021_06_30_full.json')
-CBOP_2021_09_30 <- read_process_cbop('data\\2021_09_30_full.json')
-CBOP_2021_12_31 <- read_process_cbop('data\\2021_12_31_full.json')
-CBOP_2022_03_31 <- read_process_cbop('data\\2022_03_31_full.json')
-
-CBOP_2022_06_30 <- read_process_cbop('data\\2022_06_30_full.json')
-CBOP_2022_09_30 <- read_process_cbop('data\\2022_09_30_full.json')
-CBOP_2022_12_31 <- read_process_cbop('data\\2022_12_31_full.json')
-CBOP_2023_03_31 <- read_process_cbop('data\\2023_03_31_full.json')
-
-```
-```{r}
-#NADMIAROWE KOLUMNY
-#"pra_mapaUrl"    
-#"war_mapaUrl"   
-#  "war_kodTrybuPracy"   
-#"war_trybyPracy"  
-#"war_stanowiskoNrm"
-#"poz_niepelnosprawni" 
-#poz_ofertaZgloszonaPrzezIdJednostki"
-```
-
-
-
-
-```{r}
-CBOP_2022_06_30 <-select(CBOP_2022_06_30,-c("pra_mapaUrl", "war_mapaUrl",  "war_kodTrybuPracy",  "war_trybyPracy",  "war_stanowiskoNrm" ,"poz_niepelnosprawni", "poz_ofertaZgloszonaPrzezIdJednostki" ))
-CBOP_2022_09_30 <-select(CBOP_2022_09_30,-c("pra_mapaUrl", "war_mapaUrl",  "war_kodTrybuPracy",  "war_trybyPracy",  "war_stanowiskoNrm" ,"poz_niepelnosprawni", "poz_ofertaZgloszonaPrzezIdJednostki" ))
-CBOP_2022_12_31 <-select(CBOP_2022_12_31,-c("pra_mapaUrl", "war_mapaUrl",  "war_kodTrybuPracy",  "war_trybyPracy",  "war_stanowiskoNrm" ,"poz_niepelnosprawni", "poz_ofertaZgloszonaPrzezIdJednostki" ))
-
-CBOP_2023_03_31 <-select(CBOP_2023_03_31,-c("pra_mapaUrl", "war_mapaUrl",  "war_kodTrybuPracy",  "war_trybyPracy",  "war_stanowiskoNrm" ,"poz_niepelnosprawni", "poz_ofertaZgloszonaPrzezIdJednostki" ))
-
-
-```
-
-
-
-```{r}
-#Merging the tabels
-CBOP_all<-rbind(CBOP_2020_09_30, CBOP_2020_12_31, CBOP_2021_03_31, CBOP_2021_06_30, CBOP_2021_09_30, CBOP_2021_12_31, CBOP_2022_03_31, CBOP_2022_06_30, CBOP_2022_09_30, CBOP_2022_12_31, CBOP_2023_03_31)
-regon_data <- readRDS('operat_artykul.rds')
-model <- readRDS('model.rds')
-stats_all_tab <- readRDS('stats_tab.rds')
+#Table for stats - model
+stats_tab <- rbind(stats_tab, data.table(error_type = c('Third error - missing values', 'Third error - invalid offers')), fill = TRUE)
 ```
 
 ```{r}
-#Prepare table with regon
-colnames(regon_data)[2] <- "pra_regon"
-regon_data$pra_regon <- substr(regon_data$pra_regon, 1, 9)
-regon_data <- regon_data %>% filter(duplicated(regon_data$pra_regon, 
-                                       fromLast = TRUE) == FALSE)
-
-
-#Table for stats with number of not covered data
-n_not_covered_data <- c()
-vector_stat <- c()
-```
-
-```{r}
-#Function to prepare data for further analysis (connect with information about employer)
+#Function to prepare data for further analysis
 prepare_data <- function(CBOP_year) {
-  
-  vector_stat <<- append(vector_stat, sum(CBOP_year$poz_lWolnychMiejsc, na.rm = TRUE))
-  
-  CBOP_year <- merge(x = CBOP_year, y = regon_data, by = "pra_regon", all.x = TRUE)
-  
-  n_not_covered_data <<- append(n_not_covered_data, 
-                                (CBOP_year %>% filter(is.na(klasa)) %>% count())[[1]])
   
   CBOP_year <- CBOP_year %>% 
   mutate(czas_dostepnosci = poz_ofertaWaznaDo - poz_dataPrzyjZglosz,
@@ -191,49 +37,38 @@ prepare_data <- function(CBOP_year) {
 
   CBOP_year <- CBOP_year %>% 
     filter(
-      #!is.na(poz_grupaZawodu) & 
-      !is.na(poz_lWolnychMiejsc) & 
+      !is.na(poz_grupaZawodu) & !is.na(poz_lWolnychMiejsc) & 
              !is.na(war_wojewodztwo) & !is.na(czas_dostepnosci_przedzial) & 
-             !is.na(klasa) & !is.na(sek) 
-            # & poz_grupaZawodu != '6'
+             !is.na(klasa) & !is.na(sek) & !(poz_grupaZawodu %in% c('6','0'))
            ) 
+  
+  CBOP_year$war_wojewodztwo <- stri_trans_general(CBOP_year$war_wojewodztwo, 'pl-ascii')
+  
+  vector_stat <- append(c(), sum(CBOP_year$poz_lWolnychMiejsc, na.rm = TRUE))
   
   probability <- predict(model, CBOP_year, type = 'response')
   CBOP_year <- cbind(CBOP_year, probability)
   CBOP_year$predict_vacancy <- CBOP_year$poz_lWolnychMiejsc * CBOP_year$probability
   
-  vector_stat <<- append(vector_stat, sum(cbop_year$poz_lWolnychMiejsc, na.rm = TRUE))
+  vector_stat <- append(vector_stat, sum(CBOP_year$predict_vacancy, na.rm = TRUE))
   
-  return(CBOP_year)
+  return(list("cbop"= CBOP_year, "stats" = vector_stat))
+}
+```
+
+```{r}
+#Prepare data and apply model
+for (i in 1:11) {
+  result <- prepare_data(cbop_vec[[i]])
+  cbop_vec[[i]] <- result$cbop
+  stats_tab[7:8, i + 1] <- result$stats
 }
 
+result <- prepare_data(cbop_all)
+cbop_all <- result$cbop
+stats_tab[7:8, 13] <- result$stats
 ```
 
-
-```{r}
-CBOP_all <- prepare_data(CBOP_all)
-```
-
-
-
-```{r}
-CBOP_all <- prepare_data(CBOP_all)
-```
-```{r}
-#Table for stats with number of not covered data
-names(n_not_covered_data) <- c('2020', '2021', '2022', 'all')
-n_not_covered_data <- t(data.frame(n_not_covered_data))
-
-#Table for stats over-coverage error
-vector_stat <- as.data.frame(matrix(vector_stat, nrow=2))
-stats_all_tab <- rbind(stats_all_tab, vector_stat)
-rm(vector_stat)
-stats_all_tab <- stats_all_tab[1:3,] - stats_all_tab[2:4,]
-stats_all_tab <- cbind(c('n1', 'n2', 'n3'), stats_all_tab)
-stats_all_tab <- rbind(stats_all_tab, c(0, colSums(stats_all_tab[1:3,2:5])))
-stats_all_tab[4,1] <- 'sum'
-
-```
 ```{r}
 #Number of vacancies per month - function
 n_vacancy_plot <- function(CBOP_year, startDate, endDate) {
@@ -278,7 +113,7 @@ n_vacancy_plot <- function(CBOP_year, startDate, endDate) {
 
 ```{r}
 #Number of vacancies per month
-n_vacancy_plot_all <- n_vacancy_plot(CBOP_all, "2020/10", "2022/01")
+n_vacancy_plot_all <- n_vacancy_plot(cbop_all, "2020/10", "2023/03")
 print(n_vacancy_plot_all)
 ```
 
@@ -357,7 +192,7 @@ n_occup_group_plot <- function(CBOP_year, startDate, endDate) {
 
 ```{r}
 #Demand for specific job groups
-demand_og_plot_all <- n_occup_group_plot(CBOP_all, "2020/10", "2022/01")
+demand_og_plot_all <- n_occup_group_plot(cbop_all, "2020/10", "2023/03")
 print(demand_og_plot_all)
 ```
 
@@ -429,14 +264,10 @@ n_province <- function(CBOP_year, startDate, endDate) {
 ```
 
 ```{r}
-
-
 #Number of vacancies by province
-province_plot_all <- n_province(CBOP_all, "2020/10", "2022/01")
+province_plot_all <- n_province(cbop_all, "2020/10", "2023/03")
 print(province_plot_all)
 ```
-
-
 
 ```{r}
 #Number of vacancies grouped by class - function
@@ -496,7 +327,7 @@ n_class_plot <- function(CBOP_year, startDate, endDate) {
 
 ```{r}
 #Number of vacancies grouped by class
-class_plot <- n_class_plot(CBOP_all, "2020/10", "2022/01")
+class_plot <- n_class_plot(cbop_all, "2020/10", "2023/03")
 print(class_plot)
 ```
 
@@ -557,7 +388,7 @@ n_sector_plot <- function(CBOP_year, startDate, endDate) {
 
 ```{r}
 #Number of vacancies grouped by sector
-sector_plot <- n_sector_plot(CBOP_all, "2020/10", "2022/01")
+sector_plot <- n_sector_plot(cbop_all, "2020/10", "2023/03")
 print(sector_plot)
 ```
 
@@ -622,14 +453,14 @@ contracts <- data.frame(
 
 # contract_plot <- list()
 # for (k in 1:5) {
-#   contract_plot[[k]] <- n_contract_plot(CBOP_all, "2020/10", "2022/01",
+#   contract_plot[[k]] <- n_contract_plot(cbop_all, "2020/10", "2023/03",
 #                                           contracts[k,])
 #   print(contract_plot[k])
 # }
 # rm(k)
 
-every_contracts_plot_all <- n_every_contracts_plot(CBOP_all, "2020/10",
-                                                   "2022/01", contracts)
+every_contracts_plot_all <- n_every_contracts_plot(cbop_all, "2020/10",
+                                                   "2023/03", contracts)
 print(every_contracts_plot_all)
 ```
 
