@@ -192,12 +192,13 @@ model <- glm(formula = valid_bolean ~ poz_grupaZawodu + czas_dostepnosci_przedzi
                war_wojewodztwo + klasa + sek + log(poz_lWolnychMiejsc) ,
              data = CBOP_phones,
              family = binomial(),
-             subset = poz_grupaZawodu != '6')
+             subset = poz_grupaZawodu != '6' & war_wojewodztwo != 'podlaskie')
 
 summary(model)
 
 car::Anova(model)
 ```
+
 ```{r}
 #Count R2 McFadden
 model_null <- glm(formula = valid_bolean ~ 1, data = CBOP_phones, family = binomial())
