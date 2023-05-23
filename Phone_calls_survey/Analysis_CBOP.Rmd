@@ -107,6 +107,15 @@ n_difference_vacancy <- n_jo_vacancy - n_phone_vacancy
 ```
 
 ```{r}
+# Proportion invalid offers to valid
+CBOP_proportion <- CBOP_phones %>% mutate(poz_grupaZawodu = str_sub(zawod_kod, 1, 1)) %>%
+  group_by(poz_grupaZawodu) %>% 
+  summarise(sum_wolne = sum(wolne, na.rm = TRUE),
+            sum_aktual_wolne = sum(aktual_wolne, na.rm = TRUE),
+            proportion = round((sum_wolne - sum_aktual_wolne)/(sum_wolne),2))
+```
+
+```{r}
 #Estimation of the real number of vacancies
 CBOP_phones_est_vaca <- CBOP_phones %>% filter(czy_aktualna == 'prawda') %>% 
   mutate(n_vacancies = case_when(wolne == aktual_wolne ~ 'properly estimated',
@@ -207,8 +216,7 @@ model_null <- glm(formula = valid_bolean ~ 1, data = CBOP_phones, family = binom
 ```
 
 ```{r}
-#save files
+#Save files
 saveRDS(regon_data, "regon_data.rds")
 saveRDS(model, "model.rds")
 ```
-
